@@ -168,8 +168,7 @@ bool GhostWatcher::tryJoin()
         std::string data = m_jdPlay->dpGetPlayerData(id);
         std::ostringstream ss;
         taflib::HexDump(data.data(), std::min<std::size_t>(data.size(), 128u), ss);
-        qInfo() << "[GhostWatcher::tryJoin] existing player" << id << "player data" << data.size() << "bytes
-" << ss.str().c_str();
+        qInfo() << "[GhostWatcher::tryJoin] existing player" << id << "player data" << data.size() << "bytes" << ss.str().c_str();
         if (playerData.empty() && !data.empty())
         {
             playerData = data;
