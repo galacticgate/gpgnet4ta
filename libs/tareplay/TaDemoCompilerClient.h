@@ -44,6 +44,7 @@ namespace tareplay {
     private:
 
         static QString s_ignoredPlayerName;
+        static QSet<std::uint32_t> s_ignoredDplayIds;     // dpids seen under the ignored name
 
         static bool isIgnoredPlayerName(const std::string& name);
 

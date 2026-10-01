@@ -6,6 +6,7 @@
 using namespace tareplay;
 
 QString TaDemoCompilerClient::s_ignoredPlayerName;
+QSet<std::uint32_t> TaDemoCompilerClient::s_ignoredDplayIds;
 
 void TaDemoCompilerClient::setIgnoredPlayerName(const QString& name)
 {
@@ -205,6 +206,7 @@ void TaDemoCompilerClient::onDplaySuperEnumPlayerReply(std::uint32_t dplayId, co
     if (isIgnoredPlayerName(name))
     {
         qInfo() << "[TaDemoCompilerClient::onDplaySuperEnumPlayerReply] leaving" << name.c_str() << "out of the recording";
+        s_ignoredDplayIds.insert(dplayId);
         return;
     }
     if (dplayId > 0u && !name.empty())
@@ -246,6 +248,7 @@ void TaDemoCompilerClient::onDplayCreateOrForwardPlayer(std::uint16_t command, s
     if (isIgnoredPlayerName(name))
     {
         qInfo() << "[TaDemoCompilerClient::onDplayCreateOrForwardPlayer] leaving" << name.c_str() << "out of the recording";
+        s_ignoredDplayIds.insert(dplayId);
         return;
     }
     if (dplayId > 0u && !name.empty())
@@ -306,6 +309,22 @@ void TaDemoCompilerClient::onTaPacket(
     const char* encrypted, int sizeEncrypted,
     const std::vector<tapacket::bytestring>& subpaks)
 {
+    if (!isLocalSource && s_ignoredDplayIds.contains(sourceDplayId))
+    {
+        // The ignored player (the ghost watcher) is not in the recording, but its unit sync
+        // announcements are the demo's unit table: a host only sends unit ids (sub 3), and the
+        // checksums (sub 2) come from joiners. Without them the demo has no table, unitsHash is
+        // the MD5 of nothing, and unit types cannot be resolved.
+        for (const tapacket::bytestring& s : subpaks)
+        {
+            if (s.size() >= 2u && tapacket::SubPacketCode(s[0]) == tapacket::SubPacketCode::UNIT_DATA_1A && s[1] == 0x02)
+            {
+                sendUnitData(QByteArray((const char*)s.data(), int(s.size())));
+            }
+        }
+        return;
+    }
+
     if (!isLocalSource) //sourceDplayId != m_localPlayerDplayId)
     {
         return;
