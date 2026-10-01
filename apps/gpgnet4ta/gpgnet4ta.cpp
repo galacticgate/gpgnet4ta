@@ -852,6 +852,7 @@ int doMain(int argc, char* argv[])
             // joining someone else's game shows what a real joiner sends.
             lobby.subscribePacketHandler(&lobbyPacketDump);
             gameEventsToGpgNet.ignorePlayer(GHOST_PLAYER_NAME);
+            tareplay::TaDemoCompilerClient::setIgnoredPlayerName(GHOST_PLAYER_NAME);
             QObject::connect(&gpgNetClient, &gpgnet::GpgNetClient::createLobby,
                 [&hostLobbyPort, &hostTafnetId, &hostAlias](int, int localPort, QString playerAlias, QString, int playerId, int) {
                     hostLobbyPort = localPort;

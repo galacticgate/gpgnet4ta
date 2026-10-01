@@ -5,6 +5,18 @@
 
 using namespace tareplay;
 
+QString TaDemoCompilerClient::s_ignoredPlayerName;
+
+void TaDemoCompilerClient::setIgnoredPlayerName(const QString& name)
+{
+    s_ignoredPlayerName = name;
+}
+
+bool TaDemoCompilerClient::isIgnoredPlayerName(const std::string& name)
+{
+    return !s_ignoredPlayerName.isEmpty() && QString::fromStdString(name) == s_ignoredPlayerName;
+}
+
 TaDemoCompilerClient::TaDemoCompilerClient(QString taDemoCompilerHostName, quint16 taDemoCompilerPort, quint32 tafGameId) :
     m_taDemoCompilerHostName(taDemoCompilerHostName),
     m_taDemoCompilerPort(taDemoCompilerPort),
@@ -190,6 +202,11 @@ void TaDemoCompilerClient::sendDebugRequest(quint32 gameId)
 
 void TaDemoCompilerClient::onDplaySuperEnumPlayerReply(std::uint32_t dplayId, const std::string& name, tapacket::DPAddress* tcp, tapacket::DPAddress* udp)
 {
+    if (isIgnoredPlayerName(name))
+    {
+        qInfo() << "[TaDemoCompilerClient::onDplaySuperEnumPlayerReply] leaving" << name.c_str() << "out of the recording";
+        return;
+    }
     if (dplayId > 0u && !name.empty())
     {
         qInfo() << "[TaDemoCompilerClient::onDplaySuperEnumPlayerReply] dplayId,name:" << dplayId << name.c_str();
@@ -226,6 +243,11 @@ void TaDemoCompilerClient::onDplaySuperEnumPlayerReply(std::uint32_t dplayId, co
 
 void TaDemoCompilerClient::onDplayCreateOrForwardPlayer(std::uint16_t command, std::uint32_t dplayId, const std::string& name, tapacket::DPAddress* tcp, tapacket::DPAddress* udp)
 {
+    if (isIgnoredPlayerName(name))
+    {
+        qInfo() << "[TaDemoCompilerClient::onDplayCreateOrForwardPlayer] leaving" << name.c_str() << "out of the recording";
+        return;
+    }
     if (dplayId > 0u && !name.empty())
     {
         qInfo() << "[TaDemoCompilerClient::onDplayCreateOrForwardPlayer] command,dplayId,name:" << command << dplayId << name.c_str();

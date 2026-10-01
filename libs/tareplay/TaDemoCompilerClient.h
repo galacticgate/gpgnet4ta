@@ -11,6 +11,11 @@ namespace tareplay {
     class TaDemoCompilerClient: public QObject, public tapacket::TaPacketHandler
     {
     public:
+        // GG: a DirectPlay player to leave out of the recording entirely (the ghost watcher). It never
+        // registers with the compiler, and the compiler refuses to start a demo while any locked-in
+        // player is unregistered. Static so that local AI contexts leave it out too.
+        static void setIgnoredPlayerName(const QString& name);
+
         struct ConnectionError : public std::exception
         { };
 
@@ -37,6 +42,10 @@ namespace tareplay {
         void sendMoves(QByteArray moves);
 
     private:
+
+        static QString s_ignoredPlayerName;
+
+        static bool isIgnoredPlayerName(const std::string& name);
 
         virtual void onDplaySuperEnumPlayerReply(std::uint32_t dplayId, const std::string& playerName, tapacket::DPAddress* tcp, tapacket::DPAddress* udp);
         virtual void onDplayCreateOrForwardPlayer(std::uint16_t command, std::uint32_t dplayId, const std::string& name, tapacket::DPAddress* tcp, tapacket::DPAddress* udp);
