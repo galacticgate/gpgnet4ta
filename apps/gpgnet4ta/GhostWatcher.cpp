@@ -36,7 +36,7 @@ namespace
     }
 }
 
-GhostWatcher::GhostWatcher(QString dplayGuid, QString playerName, QString hostAddress, QString unitCrcFile) :
+GhostWatcher::GhostWatcher(QString dplayGuid, QString playerName, QString hostAddress, QString unitCrcFile, int expectedSettings) :
     m_dplayGuid(dplayGuid),
     m_playerName(playerName),
     m_hostAddress(hostAddress),
@@ -55,7 +55,10 @@ GhostWatcher::GhostWatcher(QString dplayGuid, QString playerName, QString hostAd
     m_lateUnits(0u),
     m_loadingPercent(0u),
     m_sentStart(false),
-    m_hostTick(0u)
+    m_hostTick(0u),
+    m_expectedSettings(expectedSettings),
+    m_sawAi(false),
+    m_spawnOff(false)
 {
     loadUnitCrcs(unitCrcFile);
 }
@@ -263,6 +266,10 @@ void GhostWatcher::onSystemMessage(const std::uint8_t* payload, std::uint32_t si
     {
         std::uint32_t dpId = ((const DPMSG_DESTROYPLAYERORGROUP*)payload)->dpId;
         qInfo() << "[GhostWatcher::onSystemMessage] player left" << dpId;
+        if (m_aiPlayers.erase(dpId) > 0u)
+        {
+            qInfo() << "[GhostWatcher::onSystemMessage] an AI player left";
+        }
         if (dpId == m_hostDpId)
         {
             qInfo() << "[GhostWatcher::onSystemMessage] the host left; stopping";
@@ -323,6 +330,11 @@ void GhostWatcher::onSubpacket(std::uint32_t fromId, const tapacket::bytestring&
     case tapacket::SubPacketCode::PLAYER_INFO_20:
     {
         tapacket::TPlayerInfo info(s);
+        if (info.isAI() && fromId != m_dpId && m_aiPlayers.insert(fromId).second)
+        {
+            qInfo() << "[GhostWatcher::onSubpacket] AI player" << fromId << "present";
+            m_sawAi = true;
+        }
         if (!info.isAI() && !info.isWatcher() && fromId != m_dpId)
         {
             if (m_hostDpId == 0u)
@@ -347,6 +359,20 @@ void GhostWatcher::onSubpacket(std::uint32_t fromId, const tapacket::bytestring&
     case tapacket::SubPacketCode::UNIT_DATA_1A:
         onUnitData(fromId, s);
         break;
+
+    case tapacket::SubPacketCode::CHAT_05:
+    {
+        QString text = QString::fromLatin1((const char*)s.data() + 1, int(std::min<std::size_t>(s.size() - 1u, 64u))).section(QChar(0), 0, 0);
+        if (text.contains("Unit spawn is disabled") || text.contains("+spawnoff"))
+        {
+            m_spawnOff = true;
+        }
+        else if (text.contains("Unit spawn is enabled") || text.contains("+spawnon"))
+        {
+            m_spawnOff = false;
+        }
+        break;
+    }
 
     case tapacket::SubPacketCode::REJECT_1B:
     {
@@ -488,22 +514,73 @@ void GhostWatcher::sendUnitList()
 
 void GhostWatcher::updateClickedIn()
 {
-    // G1: click in once unit sync has gone quiet. G4 adds the mission checks here: the AI is
-    // present, unit spawn is on, LOS and cheats match the preset.
-    if (m_clickedIn || m_hostStatus.empty())
+    // G4: once unit sync is done, the ghost is ready exactly while the mission is intact, and
+    // says in the battleroom chat what to fix when it isn't. TA's host can only press Start
+    // while every player is clicked in, so nothing wrong can start.
+    if (m_hostStatus.empty())
     {
         return;
     }
     bool syncDone = m_sentUnitList && m_ticksSinceUnitMessage > UNIT_SYNC_QUIET_TICKS;
     bool noSync = m_unitMessagesReceived == 0u && m_ticksInState > NO_UNIT_SYNC_TICKS;
-    if (syncDone || noSync)
+    if (!syncDone && !noSync)
     {
-        qInfo() << "[GhostWatcher::updateClickedIn] clicking in; units" << m_hostUnitIds.size() << "of which late" << m_lateUnits
-            << "; unit messages received" << m_unitMessagesReceived
-                << "table" << m_unitCrcs.size() << "units, not in table" << m_unitCrcMisses;
-        m_clickedIn = true;
+        return;
+    }
+
+    QString violation = missionViolation();
+    if (violation != m_lastViolation)
+    {
+        if (!violation.isEmpty())
+        {
+            say(violation);
+        }
+        else if (!m_lastViolation.isEmpty())
+        {
+            say("Mission restored. Ready.");
+        }
+        m_lastViolation = violation;
+    }
+
+    bool ready = violation.isEmpty();
+    if (ready != m_clickedIn)
+    {
+        qInfo() << "[GhostWatcher::updateClickedIn]" << (ready ? "clicking in" : "clicking out:") << violation
+                << "; units" << m_hostUnitIds.size() << "of which late" << m_lateUnits
+                << "; unit messages received" << m_unitMessagesReceived << "table" << m_unitCrcs.size() << "units, not in table" << m_unitCrcMisses;
+        m_clickedIn = ready;
         sendStatus();
     }
+}
+
+QString GhostWatcher::missionViolation()
+{
+    tapacket::TPlayerInfo host(m_hostStatus);
+    if (host.isCheatsEnabled())
+    {
+        return "Cheat codes must be disallowed for this mission.";
+    }
+    if (m_expectedSettings >= 0 && host.getPermLosByte() != std::uint8_t(m_expectedSettings))
+    {
+        return QString("Mission settings changed. Set Game ends, Mapped, Line of sight True (0x%1, want 0x%2).")
+            .arg(host.getPermLosByte(), 2, 16, QChar('0')).arg(m_expectedSettings, 2, 16, QChar('0'));
+    }
+    if (m_spawnOff)
+    {
+        return "Unit spawn is off. Type +spawnon to bring back the mission's units.";
+    }
+    if (m_sawAi && m_aiPlayers.empty())
+    {
+        return "This mission needs its AI. Add the AI back to start.";
+    }
+    return QString();
+}
+
+void GhostWatcher::say(const QString& text)
+{
+    qInfo() << "[GhostWatcher::say]" << text;
+    std::string line = "<" + m_playerName.toStdString() + "> " + text.toStdString();
+    sendUdp(0u, tapacket::TPacket::createChatSubpacket(line));
 }
 
 void GhostWatcher::sendStatus()

@@ -672,6 +672,7 @@ int doMain(int argc, char* argv[])
     parser.addOption(QCommandLineOption("repairAsymmetricAlliances", "Flag to turn on a workaround for teams bug where one player someones is left stranded without a team"));
     parser.addOption(QCommandLineOption("noExternalAlliances", "Always derive alliance info from dplay packets; ignore shared-memory player status for alliances."));
     parser.addOption(QCommandLineOption("noExternalDeaths", "Always derive player deaths from dplay packets; ignore shared-memory player status for death detection."));
+    parser.addOption(QCommandLineOption("ghostsettings", "GG: the settings byte a mission requires of the host (hex; 0e = Game ends, Mapped, True LOS, no cheats). -1 to skip.", "ghostsettings", "0e"));
     parser.addOption(QCommandLineOption("ghostwatcher", "GG: when hosting, join the game with a receive-only watcher so that a game with no other human is still recorded."));
     parser.process(app);
 
@@ -879,8 +880,10 @@ int doMain(int argc, char* argv[])
                 ghostLobby->onJoinGame(QString("127.0.0.1:%1").arg(hostLobbyPort), hostAlias, hostAlias, hostTafnetId);
 
                 // The unit sync table lives in the game folder for now (gg-unitcrcs.csv, CRC_FBI,CRC_all).
+                bool settingsOk = false;
+                int expectedSettings = parser.value("ghostsettings").toInt(&settingsOk, 16);
                 GhostWatcher* ghostWatcher = new GhostWatcher(dplayGuid, GHOST_PLAYER_NAME, GHOST_BIND_ADDRESS,
-                    parser.value("gamepath") + "/gg-unitcrcs.csv");
+                    parser.value("gamepath") + "/gg-unitcrcs.csv", settingsOk ? expectedSettings : -1);
                 ghostWatcher->moveToThread(&ghostThread);
                 QObject::connect(&ghostThread, &QThread::started, ghostWatcher, &GhostWatcher::start);
                 QObject::connect(&ghostThread, &QThread::finished, ghostWatcher, &QObject::deleteLater);

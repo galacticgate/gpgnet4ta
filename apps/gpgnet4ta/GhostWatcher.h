@@ -7,6 +7,7 @@
 
 #include <cstdint>
 #include <map>
+#include <set>
 #include <memory>
 #include <vector>
 
@@ -29,7 +30,9 @@ class GhostWatcher : public QObject
 
 public:
     // unitCrcFile: the unit sync table, one "CRC_FBI,CRC_all" hex pair per line.
-    GhostWatcher(QString dplayGuid, QString playerName, QString hostAddress, QString unitCrcFile);
+    // expectedSettings: the host status's settings byte the mission requires (commander rule, mapping,
+    // line of sight, cheats; 0x0e = Game ends, Mapped, True, Cheats disallowed), or -1 not to check.
+    GhostWatcher(QString dplayGuid, QString playerName, QString hostAddress, QString unitCrcFile, int expectedSettings);
     ~GhostWatcher();
 
 public slots:
@@ -50,6 +53,8 @@ private:
     void onSubpacket(std::uint32_t fromId, const tapacket::bytestring& s);
     void onUnitData(std::uint32_t fromId, const tapacket::bytestring& s);
     void updateClickedIn();
+    QString missionViolation();
+    void say(const QString& text);
     void sendStatus();
     void sendUnitCount();
     void sendUnitList();
@@ -90,4 +95,11 @@ private:
     std::uint32_t m_hostTick;
 
     std::map<unsigned, unsigned> m_loggedCounts;
+
+    // G4 gatekeeping: the ghost is ready only while the mission is intact.
+    const int m_expectedSettings;
+    std::set<std::uint32_t> m_aiPlayers;
+    bool m_sawAi;
+    bool m_spawnOff;
+    QString m_lastViolation;
 };
