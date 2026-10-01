@@ -2,6 +2,7 @@
 
 #include "tapacket/TPacket.h"
 
+#include <QtCore/qelapsedtimer.h>
 #include <QtCore/qobject.h>
 #include <QtCore/qstring.h>
 
@@ -54,6 +55,8 @@ private:
     void onUnitData(std::uint32_t fromId, const tapacket::bytestring& s);
     void updateClickedIn();
     QString missionViolation();
+    bool aiPresent();
+    void logAiSummary();
     void say(const QString& text);
     void sendStatus();
     void sendUnitCount();
@@ -100,6 +103,9 @@ private:
     const int m_expectedSettings;
     std::set<std::uint32_t> m_aiPlayers;
     bool m_sawAi;
+    QElapsedTimer m_clock;
+    std::map<std::uint32_t, qint64> m_aiLastSeenMs;       // when each AI's status last arrived
+    qint64 m_aiMissingSinceMs;                             // -1 while an AI is present
     std::set<std::uint32_t> m_slotPlayers;                 // the host's latest slot list (IDENT2_26)
     bool m_haveSlotList;
     bool m_spawnOff;

@@ -7,6 +7,7 @@
 #include <QtCore/qfile.h>
 #include <QtCore/qtextstream.h>
 #include <QtCore/qcoreevent.h>
+#include <QtCore/qelapsedtimer.h>
 
 #include <dplay.h>
 #include <algorithm>
@@ -19,6 +20,10 @@ namespace
     const unsigned SEARCH_INTERVAL_TICKS = 20;          // retry the session search every 2 s
     const unsigned SEARCH_GIVE_UP_TICKS = 6000;         // stop looking after 10 min
     const unsigned STATUS_INTERVAL_TICKS = 10;          // repeat our status every 1 s
+    const unsigned AI_SUMMARY_TICKS = 50;               // log what the AI rule sees every 5 s
+    const qint64 AI_STALE_MS = 6000;                    // an AI is gone once its status (sent every ~2 s) stops this long
+    const qint64 AI_MISSING_GRACE_MS = 4000;            // and the mission objects only after this long, so a
+                                                        // newly added AI is not briefly reported missing
     const unsigned UNIT_SYNC_QUIET_TICKS = 30;          // sync counts as done after 3 s of silence
     const unsigned NO_UNIT_SYNC_TICKS = 150;            // or after 15 s if the host never starts one
     const unsigned LOADING_STEP_TICKS = 5;
@@ -58,6 +63,7 @@ GhostWatcher::GhostWatcher(QString dplayGuid, QString playerName, QString hostAd
     m_hostTick(0u),
     m_expectedSettings(expectedSettings),
     m_sawAi(false),
+    m_aiMissingSinceMs(-1),
     m_haveSlotList(false),
     m_spawnOff(false)
 {
@@ -104,6 +110,7 @@ GhostWatcher::~GhostWatcher()
 void GhostWatcher::start()
 {
     qInfo() << "[GhostWatcher::start] name" << m_playerName << "joining" << m_hostAddress << "guid" << m_dplayGuid;
+    m_clock.start();
     m_timerId = startTimer(TIMER_MS, Qt::TimerType::PreciseTimer);
 }
 
@@ -158,6 +165,10 @@ void GhostWatcher::timerEvent(QTimerEvent*)
             if (m_ticksInState % STATUS_INTERVAL_TICKS == 0u)
             {
                 sendStatus();
+            }
+            if (m_ticksInState % AI_SUMMARY_TICKS == 0u)
+            {
+                logAiSummary();
             }
             break;
 
@@ -341,10 +352,14 @@ void GhostWatcher::onSubpacket(std::uint32_t fromId, const tapacket::bytestring&
     case tapacket::SubPacketCode::PLAYER_INFO_20:
     {
         tapacket::TPlayerInfo info(s);
-        if (info.isAI() && fromId != m_dpId && m_aiPlayers.insert(fromId).second)
+        if (info.isAI() && fromId != m_dpId)
         {
-            qInfo() << "[GhostWatcher::onSubpacket] AI player" << fromId << "present";
-            m_sawAi = true;
+            if (m_aiPlayers.insert(fromId).second)
+            {
+                qInfo() << "[GhostWatcher::onSubpacket] AI player" << fromId << "present";
+                m_sawAi = true;
+            }
+            m_aiLastSeenMs[fromId] = m_clock.elapsed();
         }
         if (!info.isAI() && !info.isWatcher() && fromId != m_dpId)
         {
@@ -605,16 +620,59 @@ QString GhostWatcher::missionViolation()
     {
         return "Unit spawn is off. Type +spawnon.";
     }
-    bool aiInSlot = false;
-    for (std::uint32_t ai : m_aiPlayers)
+    // Removing an AI (click its name until the slot is empty) neither deletes its DirectPlay
+    // player nor takes it off the host's slot list (game 2267, list unchanged for minutes), so
+    // the AI counts as present while its status packets keep coming and the slot list (when we
+    // have one) still names it.
+    if (m_sawAi && !aiPresent())
     {
-        aiInSlot = aiInSlot || !m_haveSlotList || m_slotPlayers.count(ai) > 0u;
+        if (m_aiMissingSinceMs < 0)
+        {
+            m_aiMissingSinceMs = m_clock.elapsed();
+        }
+        if (m_clock.elapsed() - m_aiMissingSinceMs >= AI_MISSING_GRACE_MS)
+        {
+            return "This mission needs its AI. Add it back.";
+        }
     }
-    if (m_sawAi && !aiInSlot)
+    else
     {
-        return "This mission needs its AI. Add it back.";
+        m_aiMissingSinceMs = -1;
     }
     return QString();
+}
+
+bool GhostWatcher::aiPresent()
+{
+    for (std::uint32_t ai : m_aiPlayers)
+    {
+        auto seen = m_aiLastSeenMs.find(ai);
+        bool recent = seen != m_aiLastSeenMs.end() && m_clock.elapsed() - seen->second < AI_STALE_MS;
+        bool inSlot = !m_haveSlotList || m_slotPlayers.count(ai) > 0u;
+        if (recent && inSlot)
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+void GhostWatcher::logAiSummary()
+{
+    QStringList slots;
+    for (std::uint32_t dpid : m_slotPlayers)
+    {
+        slots << QString::number(dpid);
+    }
+    QStringList ais;
+    for (std::uint32_t ai : m_aiPlayers)
+    {
+        auto seen = m_aiLastSeenMs.find(ai);
+        qint64 age = seen == m_aiLastSeenMs.end() ? -1 : m_clock.elapsed() - seen->second;
+        ais << QString("%1 status %2 ms ago %3").arg(ai).arg(age).arg(m_slotPlayers.count(ai) ? "in slot list" : "not in slot list");
+    }
+    qInfo() << "[GhostWatcher::logAiSummary] slot list" << slots.join(' ') << "| AI:" << (ais.isEmpty() ? QString("none") : ais.join("; "))
+            << "| present" << aiPresent();
 }
 
 void GhostWatcher::say(const QString& text)
