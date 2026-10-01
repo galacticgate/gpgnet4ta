@@ -861,7 +861,7 @@ int doMain(int argc, char* argv[])
                 quint16 ghostPort = 0;
                 {
                     QUdpSocket probe;
-                    probe.bind(QHostAddress::LocalHost, 0);
+                    probe.bind(QHostAddress(QHostAddress::LocalHost), quint16(0));
                     ghostPort = probe.localPort();
                 }
                 qInfo() << "[main] ghost watcher: tafnet port" << ghostPort << "host port" << hostLobbyPort << "host" << hostAlias << hostTafnetId;
