@@ -5,6 +5,12 @@ else()
   set(IRC_SOURCES IrcForwardMock.h;IrcForwardMock.cpp)
 endif()
 
+# GG: the ghost watcher joins TA through DirectPlay, which only the Windows build has.
+if (WIN32)
+  set(GHOST_SOURCES GhostWatcher.h;GhostWatcher.cpp)
+  set(GHOST_LIBS jdplay;${DIRECT_PLAY_LIBS})
+endif()
+
 set(CMAKE_AUTOMOC ON)
 add_executable(gpgnet4ta
     GameEventHandlerQt.h
@@ -17,6 +23,7 @@ add_executable(gpgnet4ta
     TaLobby.h
     TaLobby.cpp
     ${IRC_SOURCES}
+    ${GHOST_SOURCES}
     )
 
 target_include_directories(gpgnet4ta 
@@ -24,11 +31,13 @@ target_include_directories(gpgnet4ta
     ${CMAKE_SOURCE_DIR}
     ${CMAKE_SOURCE_DIR}/libs
     ${LIBCOMMUNI_INCLUDE_DIR}
+    ${DIRECT_PLAY_INCLUDE_DIR}
     )
 
 target_link_directories(gpgnet4ta
     PUBLIC
     ${LIBCOMMUNI_LIB_DIR}
+    ${DIRECT_PLAY_LIB_DIR}
     )
 
 target_link_libraries(gpgnet4ta
@@ -41,6 +50,7 @@ target_link_libraries(gpgnet4ta
     Qt5::Core
     Qt5::Network
     ${LIBCOMMUNI_LIBS_STATIC}
+    ${GHOST_LIBS}
     )
 
 install(TARGETS gpgnet4ta)

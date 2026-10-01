@@ -25,6 +25,19 @@
 #endif
 
 #ifdef _WIN32
+#include "GhostWatcher.h"
+#include <QtCore/qthread.h>
+#include <QtNetwork/qudpsocket.h>
+
+// GG ghost watcher (--ghostwatcher). Its tafnet id must not collide with a real player id.
+static const char* GHOST_PLAYER_NAME = "GGRecorder";
+static const int GHOST_TAFNET_ID = 2000000001;
+// The ghost's side listens on a second loopback address: the host's TA already holds port
+// 47624 on 127.0.0.1, and the joining side needs that port for session enumeration.
+static const char* GHOST_BIND_ADDRESS = "127.0.0.2";
+#endif
+
+#ifdef _WIN32
 const char *MAP_TOOL_EXE = "maptool.exe";
 #endif
 
@@ -54,11 +67,19 @@ class ForwardGameEventsToGpgNet : public GameEventHandlerQt
         }
     }
 
+    // GG: the ghost watcher is plumbing, not a participant, so the server never hears of it.
+    QString m_ignoredPlayerName;
+
 public:
     ForwardGameEventsToGpgNet(gpgnet::GpgNetClient& gpgNetClient, std::function<QString(QString)> getMapDetails) :
         m_gpgNetClient(gpgNetClient),
         getMapDetails(getMapDetails)
     { }
+
+    void ignorePlayer(QString name)
+    {
+        m_ignoredPlayerName = name;
+    }
 
     virtual void onGameSettings(QString mapName, quint16 maxUnits, QString hostName, QString localName)
     {
@@ -87,6 +108,10 @@ public:
         try
         {
             taflib::Watchdog wd("ForwardGameEventsToGpgNet::onPlayerStatus", 100);
+            if (!m_ignoredPlayerName.isEmpty() && name == m_ignoredPlayerName)
+            {
+                return;
+            }
             QString gpgnetId = QString::number(m_gpgNetClient.lookupPlayerId(name));
 
             // Forged Alliance reserves Team=1 for the team-not-selected team
@@ -646,6 +671,7 @@ int doMain(int argc, char* argv[])
     parser.addOption(QCommandLineOption("repairAsymmetricAlliances", "Flag to turn on a workaround for teams bug where one player someones is left stranded without a team"));
     parser.addOption(QCommandLineOption("noExternalAlliances", "Always derive alliance info from dplay packets; ignore shared-memory player status for alliances."));
     parser.addOption(QCommandLineOption("noExternalDeaths", "Always derive player deaths from dplay packets; ignore shared-memory player status for death detection."));
+    parser.addOption(QCommandLineOption("ghostwatcher", "GG: when hosting, join the game with a receive-only watcher so that a game with no other human is still recorded."));
     parser.process(app);
 
     taflib::Logger::Initialise(parser.value("logfile").toStdString(), taflib::Logger::Verbosity(parser.value("loglevel").toInt()));
@@ -808,6 +834,56 @@ int doMain(int argc, char* argv[])
 
         QObject::connect(&launchClient, &talaunch::LaunchClient::playerStatusReceived,
                          &lobby,        &TaLobby::onExternalPlayerStatus);
+
+#ifdef _WIN32
+        // GG ghost watcher. When hosting, a second, joining TaLobby is wired straight to ours (no
+        // ICE adapter, no server) and a DirectPlay bot joins TA through it as a watcher. TA then
+        // sends the whole game to a "remote" player, so our normal recording path records it.
+        std::unique_ptr<TaLobby> ghostLobby;
+        QThread ghostThread;
+        int hostLobbyPort = 0;
+        int hostTafnetId = 0;
+        QString hostAlias;
+        if (parser.isSet("ghostwatcher"))
+        {
+            gameEventsToGpgNet.ignorePlayer(GHOST_PLAYER_NAME);
+            QObject::connect(&gpgNetClient, &gpgnet::GpgNetClient::createLobby,
+                [&hostLobbyPort, &hostTafnetId, &hostAlias](int, int localPort, QString playerAlias, QString, int playerId, int) {
+                    hostLobbyPort = localPort;
+                    hostTafnetId = playerId;
+                    hostAlias = playerAlias;
+                });
+            QObject::connect(&gpgNetClient, &gpgnet::GpgNetClient::hostGame, [&](QString) {
+                if (ghostLobby)
+                {
+                    return;
+                }
+                quint16 ghostPort = 0;
+                {
+                    QUdpSocket probe;
+                    probe.bind(QHostAddress::LocalHost, 0);
+                    ghostPort = probe.localPort();
+                }
+                qInfo() << "[main] ghost watcher: tafnet port" << ghostPort << "host port" << hostLobbyPort << "host" << hostAlias << hostTafnetId;
+
+                ghostLobby.reset(new TaLobby(QUuid(dplayGuid), "127.0.0.1", GHOST_BIND_ADDRESS, "127.0.0.1",
+                    false, parser.value("maxpacketsize").toInt(), false, false, false));
+                ghostLobby->onCreateLobby(0, ghostPort, GHOST_PLAYER_NAME, GHOST_PLAYER_NAME, GHOST_TAFNET_ID, 0);
+                lobby.onConnectToPeer(QString("127.0.0.1:%1").arg(ghostPort), GHOST_PLAYER_NAME, GHOST_PLAYER_NAME, GHOST_TAFNET_ID);
+                ghostLobby->onJoinGame(QString("127.0.0.1:%1").arg(hostLobbyPort), hostAlias, hostAlias, hostTafnetId);
+
+                GhostWatcher* ghostWatcher = new GhostWatcher(dplayGuid, GHOST_PLAYER_NAME, GHOST_BIND_ADDRESS);
+                ghostWatcher->moveToThread(&ghostThread);
+                QObject::connect(&ghostThread, &QThread::started, ghostWatcher, &GhostWatcher::start);
+                QObject::connect(&ghostThread, &QThread::finished, ghostWatcher, &QObject::deleteLater);
+                ghostThread.start();
+            });
+            QObject::connect(&app, &QCoreApplication::aboutToQuit, [&ghostThread]() {
+                ghostThread.quit();
+                ghostThread.wait(3000);
+            });
+        }
+#endif
 
         taflib::ConsoleReader consoleReader(QHostAddress("127.0.0.1"), parser.value("consoleport").toInt());
         QObject::connect(&consoleReader, &taflib::ConsoleReader::textReceived, &launcher, &GpgNetGameLauncher::onExtendedMessage);

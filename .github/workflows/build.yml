@@ -1,4 +1,4 @@
-# GG: tags publish a release, as upstream. Pushes to gg and gg/* branches, and manual runs,
+# GG: tags publish a release, as upstream. Pushes to gg, gg/* and gg-* branches, and manual runs,
 # build the same files as a workflow artifact only, so work in progress can be tested without
 # publishing a release.
 on:
@@ -8,6 +8,7 @@ on:
     branches:
       - 'gg'
       - 'gg/**'
+      - 'gg-*'
   workflow_dispatch:
 
 env:
