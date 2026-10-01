@@ -659,10 +659,10 @@ bool GhostWatcher::aiPresent()
 
 void GhostWatcher::logAiSummary()
 {
-    QStringList slots;
+    QStringList slotIds;
     for (std::uint32_t dpid : m_slotPlayers)
     {
-        slots << QString::number(dpid);
+        slotIds << QString::number(dpid);
     }
     QStringList ais;
     for (std::uint32_t ai : m_aiPlayers)
@@ -671,7 +671,7 @@ void GhostWatcher::logAiSummary()
         qint64 age = seen == m_aiLastSeenMs.end() ? -1 : m_clock.elapsed() - seen->second;
         ais << QString("%1 status %2 ms ago %3").arg(ai).arg(age).arg(m_slotPlayers.count(ai) ? "in slot list" : "not in slot list");
     }
-    qInfo() << "[GhostWatcher::logAiSummary] slot list" << slots.join(' ') << "| AI:" << (ais.isEmpty() ? QString("none") : ais.join("; "))
+    qInfo() << "[GhostWatcher::logAiSummary] slot list" << slotIds.join(' ') << "| AI:" << (ais.isEmpty() ? QString("none") : ais.join("; "))
             << "| present" << aiPresent();
 }
 
