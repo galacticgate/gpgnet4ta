@@ -1,7 +1,14 @@
+# GG: tags publish a release, as upstream. Pushes to gg and gg/* branches, and manual runs,
+# build the same files as a workflow artifact only, so work in progress can be tested without
+# publishing a release.
 on:
   push:
     tags:
       - '*'
+    branches:
+      - 'gg'
+      - 'gg/**'
+  workflow_dispatch:
 
 env:
   BUILD_TYPE: Release
@@ -52,11 +59,12 @@ jobs:
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-    - name: Docker image
-      uses: docker/build-push-action@v1.1.1
-      if: github.ref == 'refs/heads/develop' || startsWith(github.ref, 'refs/tags')
+    - name: Upload test build
+      uses: actions/upload-artifact@v4
+      if: ${{ !startsWith(github.ref, 'refs/tags/') }}
       with:
-        username: ${{ secrets.DOCKER_USERNAME }}
-        password: ${{ secrets.DOCKER_PASSWORD }}
-        repository: taforever/taf-gpgnet4ta
-        tag_with_ref: true
+        name: gpgnet4ta-${{ github.sha }}
+        retention-days: 14
+        path: |
+          build-win-x86/gpgnet4ta-win-x86.zip
+          build-ubuntu-focal-x64/gpgnet4ta-ubuntu-focal-x64.tar.gz
