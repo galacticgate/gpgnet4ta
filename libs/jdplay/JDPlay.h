@@ -35,6 +35,7 @@
 #include <memory>
 #include <sstream>
 #include <string>
+#include <vector>
 
 namespace jdplay {
 
@@ -101,6 +102,11 @@ namespace jdplay {
         void dpSend(DPID sourceDplayId, DPID destDplayId, DWORD flags, LPVOID data, DWORD size);
         bool dpReceive(std::uint8_t* buffer, std::uint32_t& size, std::uint32_t& from, std::uint32_t& to);
         std::uint32_t dpCreatePlayer(const char* name);
+        // GG ghost watcher: create a player carrying DirectPlay player data, list the session's
+        // player ids, and read a player's (remote) data.
+        std::uint32_t dpCreatePlayer(const char* name, const void* data, std::uint32_t size);
+        std::vector<std::uint32_t> dpPlayerIds();
+        std::string dpGetPlayerData(std::uint32_t dpid);
         void dpDestroyPlayer(std::uint32_t dpid);
         void dpSetPlayerName(std::uint32_t id, const char* name);
         void dpEnumPlayers();

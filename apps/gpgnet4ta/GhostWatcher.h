@@ -39,6 +39,7 @@ private:
 
     void timerEvent(QTimerEvent* event) override;
     void setState(State state);
+    void stopTimer();
     bool tryJoin();
     void receiveAll();
     void onSystemMessage(const std::uint8_t* payload, std::uint32_t size);

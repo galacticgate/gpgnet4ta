@@ -66,6 +66,15 @@ void GhostWatcher::start()
     m_timerId = startTimer(TIMER_MS, Qt::TimerType::PreciseTimer);
 }
 
+void GhostWatcher::stopTimer()
+{
+    if (m_timerId != 0)
+    {
+        killTimer(m_timerId);
+        m_timerId = 0;
+    }
+}
+
 void GhostWatcher::setState(State state)
 {
     qInfo() << "[GhostWatcher::setState]" << stateName(int(m_state)) << "->" << stateName(int(state)) << "after" << m_ticksInState << "ticks";
@@ -88,7 +97,7 @@ void GhostWatcher::timerEvent(QTimerEvent*)
             else if (m_ticksInState > SEARCH_GIVE_UP_TICKS)
             {
                 qWarning() << "[GhostWatcher::timerEvent] no TA session found; giving up";
-                killTimer(m_timerId);
+                stopTimer();
             }
             break;
 
@@ -134,7 +143,9 @@ bool GhostWatcher::tryJoin()
 {
     if (!m_jdPlay)
     {
-        m_jdPlay.reset(new jdplay::JDPlay(m_playerName.toStdString().c_str(), 3, NULL));
+        // searchValidationCount 0: join on the first sighting. 3 made jdplay wait for the same
+        // session description four times running, about a minute here.
+        m_jdPlay.reset(new jdplay::JDPlay(m_playerName.toStdString().c_str(), 0, NULL));
         if (!m_jdPlay->initialize(m_dplayGuid.toStdString().c_str(), m_hostAddress.toStdString().c_str(), false, 10))
         {
             qWarning() << "[GhostWatcher::tryJoin] jdplay failed to initialise";
@@ -149,8 +160,26 @@ bool GhostWatcher::tryJoin()
         return false;
     }
 
-    m_dpId = m_jdPlay->dpCreatePlayer(m_playerName.toStdString().c_str());
-    qInfo() << "[GhostWatcher::tryJoin] joined; our dpid" << m_dpId;
+    // A joining TA creates its DirectPlay player with player data attached, and the host
+    // rejected us within a second when ours had none. Mirror the host's, as with the status.
+    std::string playerData;
+    for (std::uint32_t id : m_jdPlay->dpPlayerIds())
+    {
+        std::string data = m_jdPlay->dpGetPlayerData(id);
+        std::ostringstream ss;
+        taflib::HexDump(data.data(), std::min<std::size_t>(data.size(), 128u), ss);
+        qInfo() << "[GhostWatcher::tryJoin] existing player" << id << "player data" << data.size() << "bytes
+" << ss.str().c_str();
+        if (playerData.empty() && !data.empty())
+        {
+            playerData = data;
+        }
+    }
+
+    m_dpId = playerData.empty()
+        ? m_jdPlay->dpCreatePlayer(m_playerName.toStdString().c_str())
+        : m_jdPlay->dpCreatePlayer(m_playerName.toStdString().c_str(), playerData.data(), std::uint32_t(playerData.size()));
+    qInfo() << "[GhostWatcher::tryJoin] joined; our dpid" << m_dpId << "with" << playerData.size() << "bytes of player data";
     return m_dpId != 0u;
 }
 
@@ -196,13 +225,13 @@ void GhostWatcher::onSystemMessage(const std::uint8_t* payload, std::uint32_t si
         if (dpId == m_hostDpId)
         {
             qInfo() << "[GhostWatcher::onSystemMessage] the host left; stopping";
-            killTimer(m_timerId);
+            stopTimer();
         }
         break;
     }
     case DPSYS_SESSIONLOST:
         qInfo() << "[GhostWatcher::onSystemMessage] session lost; stopping";
-        killTimer(m_timerId);
+        stopTimer();
         break;
     default:
         qInfo() << "[GhostWatcher::onSystemMessage] type" << QString::number(msg->dwType, 16);
@@ -262,7 +291,13 @@ void GhostWatcher::onSubpacket(std::uint32_t fromId, const tapacket::bytestring&
             }
             if (fromId == m_hostDpId)
             {
+                bool first = m_hostStatus.empty();
                 m_hostStatus = s;
+                if (first)
+                {
+                    // A joiner answers with its own status at once; don't wait for the timer.
+                    sendStatus();
+                }
             }
         }
         break;
@@ -271,6 +306,14 @@ void GhostWatcher::onSubpacket(std::uint32_t fromId, const tapacket::bytestring&
     case tapacket::SubPacketCode::UNIT_DATA_1A:
         onUnitData(fromId, s);
         break;
+
+    case tapacket::SubPacketCode::REJECT_1B:
+    {
+        std::uint32_t rejected = std::uint32_t(s[1] | s[2] << 8 | s[3] << 16 | s[4] << 24);
+        qWarning() << "[GhostWatcher::onSubpacket] dpid" << fromId << "rejected" << rejected
+                   << (rejected == m_dpId ? "(us)" : "") << "reason" << QString::number(s[5], 16);
+        break;
+    }
 
     case tapacket::SubPacketCode::LOADING_STARTED_08:
         if (m_state == State::LOBBY)

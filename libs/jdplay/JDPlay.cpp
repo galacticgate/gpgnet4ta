@@ -868,6 +868,50 @@ namespace jdplay {
         return dpid;
     }
 
+    std::uint32_t JDPlay::dpCreatePlayer(const char* nameA, const void* data, std::uint32_t size)
+    {
+        DPID dpid = 0;
+        DPNAME dpname;
+        std::string name = FromAnsi(nameA);
+        std::memset(&dpname, 0, sizeof(dpname));
+        dpname.dwSize = sizeof(dpname);
+        dpname.lpszLongName = (LPWSTR)name.data();
+        dpname.lpszShortName = (LPWSTR)name.data();
+
+        lpDP->CreatePlayer(&dpid, &dpname, 0, (LPVOID)data, size, 0);
+        return dpid;
+    }
+
+    static BOOL FAR PASCAL collectPlayerIdsCallback(DPID dpId, DWORD, LPCDPNAME, DWORD, LPVOID lpContext)
+    {
+        ((std::vector<std::uint32_t>*)lpContext)->push_back(dpId);
+        return TRUE;
+    }
+
+    std::vector<std::uint32_t> JDPlay::dpPlayerIds()
+    {
+        std::vector<std::uint32_t> ids;
+        lpDP->EnumPlayers(NULL, collectPlayerIdsCallback, &ids, DPENUMPLAYERS_ALL);
+        return ids;
+    }
+
+    std::string JDPlay::dpGetPlayerData(std::uint32_t dpid)
+    {
+        DWORD size = 0;
+        lpDP->GetPlayerData(dpid, NULL, &size, DPGET_REMOTE);
+        if (size == 0)
+        {
+            return std::string();
+        }
+        std::string data(size, ' ');
+        if (lpDP->GetPlayerData(dpid, (LPVOID)data.data(), &size, DPGET_REMOTE) != DP_OK)
+        {
+            return std::string();
+        }
+        data.resize(size);
+        return data;
+    }
+
     void JDPlay::dpDestroyPlayer(std::uint32_t dpid)
     {
         lpDP->DestroyPlayer(dpid);
