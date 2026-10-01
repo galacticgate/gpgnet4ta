@@ -100,6 +100,8 @@ private:
     const int m_expectedSettings;
     std::set<std::uint32_t> m_aiPlayers;
     bool m_sawAi;
+    std::set<std::uint32_t> m_slotPlayers;                 // the host's latest slot list (IDENT2_26)
+    bool m_haveSlotList;
     bool m_spawnOff;
     QString m_lastViolation;
 };

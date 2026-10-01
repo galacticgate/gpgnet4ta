@@ -58,6 +58,7 @@ GhostWatcher::GhostWatcher(QString dplayGuid, QString playerName, QString hostAd
     m_hostTick(0u),
     m_expectedSettings(expectedSettings),
     m_sawAi(false),
+    m_haveSlotList(false),
     m_spawnOff(false)
 {
     loadUnitCrcs(unitCrcFile);
@@ -372,23 +373,47 @@ void GhostWatcher::onSubpacket(std::uint32_t fromId, const tapacket::bytestring&
 
     case tapacket::SubPacketCode::CHAT_05:
     {
-        QString text = QString::fromLatin1((const char*)s.data() + 1, int(std::min<std::size_t>(s.size() - 1u, 64u))).section(QChar(0), 0, 0);
-        if (text.contains("Unit spawn is disabled") || text.contains("+spawnoff"))
+        // TDraw's "+spawnoff" acts on the TA it is typed into, and its reply ("Unit spawn is
+        // disabled ...") only shows on that screen; the command itself is broadcast, so follow
+        // the host's. TA writes the line as "<name> text"; matched in any letter case (game 2266).
+        if (fromId != m_hostDpId)
         {
+            break;
+        }
+        QString text = QString::fromLatin1((const char*)s.data() + 1, int(std::min<std::size_t>(s.size() - 1u, 64u))).section(QChar(0), 0, 0);
+        QString command = text.section("> ", 1).trimmed().toLower();
+        if (command.startsWith("+spawnoff"))
+        {
+            qInfo() << "[GhostWatcher::onSubpacket] host switched unit spawn off";
             m_spawnOff = true;
         }
-        else if (text.contains("Unit spawn is enabled") || text.contains("+spawnon"))
+        else if (command.startsWith("+spawnon"))
         {
+            qInfo() << "[GhostWatcher::onSubpacket] host switched unit spawn on";
             m_spawnOff = false;
         }
         break;
     }
 
-    case tapacket::SubPacketCode::REJECT_1B:
+    case tapacket::SubPacketCode::IDENT2_26:
     {
-        std::uint32_t rejected = std::uint32_t(s[1] | s[2] << 8 | s[3] << 16 | s[4] << 24);
-        qWarning() << "[GhostWatcher::onSubpacket] dpid" << fromId << "rejected" << rejected
-                   << (rejected == m_dpId ? "(us)" : "") << "reason" << QString::number(s[5], 16);
+        // The host's slot list, repeated every couple of seconds. Removing an AI takes it off
+        // this list but does not delete its DirectPlay player (game 2266), so this is how an AI
+        // leaving shows.
+        if (fromId != m_hostDpId)
+        {
+            break;
+        }
+        m_slotPlayers.clear();
+        for (std::size_t at = 1u; at + 4u <= s.size(); at += 4u)
+        {
+            std::uint32_t dpid = std::uint32_t(s[at] | s[at + 1] << 8 | s[at + 2] << 16 | s[at + 3] << 24);
+            if (dpid != 0u)
+            {
+                m_slotPlayers.insert(dpid);
+            }
+        }
+        m_haveSlotList = true;
         break;
     }
 
@@ -580,7 +605,12 @@ QString GhostWatcher::missionViolation()
     {
         return "Unit spawn is off. Type +spawnon.";
     }
-    if (m_sawAi && m_aiPlayers.empty())
+    bool aiInSlot = false;
+    for (std::uint32_t ai : m_aiPlayers)
+    {
+        aiInSlot = aiInSlot || !m_haveSlotList || m_slotPlayers.count(ai) > 0u;
+    }
+    if (m_sawAi && !aiInSlot)
     {
         return "This mission needs its AI. Add it back.";
     }
