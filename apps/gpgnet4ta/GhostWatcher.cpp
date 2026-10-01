@@ -400,20 +400,28 @@ void GhostWatcher::onUnitData(std::uint32_t fromId, const tapacket::bytestring& 
     case 0x00:
         m_unitMessagesReceived = 1u;
         m_unitCrcMisses = 0u;
+        m_unitStatusCounts.clear();
         m_hostUnitIds.clear();
         m_sentUnitList = false;
         break;
 
     case 0x03:
         ++m_unitMessagesReceived;
-        if (unit.u.statusAndLimit[0] == 0x0001)
+        ++m_unitStatusCounts[unit.u.statusAndLimit[0]];
+        if (m_sentUnitList)
         {
-            m_hostUnitIds.push_back(unit.id);
+            break;
         }
-        else if (!m_sentUnitList && !m_hostUnitIds.empty())
+        if (unit.u.statusAndLimit[0] == 0x0101 && !m_hostUnitIds.empty())
         {
             // Round two has begun; announce our list now if the quiet timer hasn't yet.
             sendUnitList();
+        }
+        else if (std::find(m_hostUnitIds.begin(), m_hostUnitIds.end(), unit.id) == m_hostUnitIds.end())
+        {
+            // Every unit in round one, in use (low byte 01) or not (00): a real joiner announces
+            // its whole list (319 for RES), and the demo's unit table is matched by its length.
+            m_hostUnitIds.push_back(unit.id);
         }
         break;
 
@@ -454,7 +462,12 @@ void GhostWatcher::sendUnitList()
         send(0u, unit.asSubPacket());
     }
     m_sentUnitList = true;
-    qInfo() << "[GhostWatcher::sendUnitList] announced" << m_hostUnitIds.size() << "units," << m_unitCrcMisses << "not in table";
+    QStringList statuses;
+    for (const auto& kv : m_unitStatusCounts)
+    {
+        statuses << QString("%1:%2").arg(kv.first, 4, 16, QChar('0')).arg(kv.second);
+    }
+    qInfo() << "[GhostWatcher::sendUnitList] announced" << m_hostUnitIds.size() << "units," << m_unitCrcMisses << "not in table; sub 3 statuses so far" << statuses.join(' ');
 }
 
 void GhostWatcher::updateClickedIn()
