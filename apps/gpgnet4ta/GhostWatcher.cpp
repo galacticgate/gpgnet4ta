@@ -4,6 +4,8 @@
 #include "taflib/HexDump.h"
 
 #include <QtCore/qdebug.h>
+#include <QtCore/qfile.h>
+#include <QtCore/qtextstream.h>
 #include <QtCore/qcoreevent.h>
 
 #include <dplay.h>
@@ -33,7 +35,7 @@ namespace
     }
 }
 
-GhostWatcher::GhostWatcher(QString dplayGuid, QString playerName, QString hostAddress) :
+GhostWatcher::GhostWatcher(QString dplayGuid, QString playerName, QString hostAddress, QString unitCrcFile) :
     m_dplayGuid(dplayGuid),
     m_playerName(playerName),
     m_hostAddress(hostAddress),
@@ -47,10 +49,42 @@ GhostWatcher::GhostWatcher(QString dplayGuid, QString playerName, QString hostAd
     m_unitMessagesReceived(0u),
     m_ticksSinceUnitMessage(0u),
     m_unitCountDirty(false),
+    m_unitCrcMisses(0u),
     m_loadingPercent(0u),
     m_sentStart(false),
     m_hostTick(0u)
-{ }
+{
+    loadUnitCrcs(unitCrcFile);
+}
+
+void GhostWatcher::loadUnitCrcs(const QString& path)
+{
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text))
+    {
+        qWarning() << "[GhostWatcher::loadUnitCrcs] no unit sync table at" << path << "; unit sync will not complete";
+        return;
+    }
+    QTextStream in(&file);
+    while (!in.atEnd())
+    {
+        QString line = in.readLine().trimmed();
+        if (line.isEmpty() || line.startsWith('#'))
+        {
+            continue;
+        }
+        QStringList parts = line.split(',');
+        bool okId = false;
+        bool okCrc = false;
+        std::uint32_t id = parts.value(0).toUInt(&okId, 16);
+        std::uint32_t crc = parts.value(1).toUInt(&okCrc, 16);
+        if (okId && okCrc)
+        {
+            m_unitCrcs[id] = crc;
+        }
+    }
+    qInfo() << "[GhostWatcher::loadUnitCrcs]" << m_unitCrcs.size() << "units from" << path;
+}
 
 GhostWatcher::~GhostWatcher()
 {
@@ -341,10 +375,12 @@ void GhostWatcher::onSubpacket(std::uint32_t fromId, const tapacket::bytestring&
 
 void GhostWatcher::onUnitData(std::uint32_t fromId, const tapacket::bytestring& s)
 {
-    // Unit sync. Mirror the host: whatever unit list and checksums it has, we have too, so the
-    // ghost never needs the mod's files. sub 0 asks for our list, sub 3 is a unit id with its
-    // in-use flag and limit, sub 2 is a unit id with its checksum, sub 4 is a running count of
-    // the other side's messages received.
+    // Unit sync, as the original replay server ran it against real joiners (TADR Server/tasv.pas):
+    //   host: sub 0, a request, which restarts its count of messages sent
+    //   host: sub 3 per unit, status 0x0001: round one, the unit list. A unit's id on the wire is
+    //         its CRC_FBI. We answer each with sub 2 carrying (CRC_FBI, CRC_all).
+    //   host: sub 3 per unit again, status 0x0101 and its build limit: round two, acknowledgements.
+    // After each round the host waits until our sub 4 count of its messages matches what it sent.
     if (fromId != m_hostDpId && m_hostDpId != 0u)
     {
         return;
@@ -353,34 +389,39 @@ void GhostWatcher::onUnitData(std::uint32_t fromId, const tapacket::bytestring& 
     m_ticksSinceUnitMessage = 0u;
     switch (unit.sub)
     {
-    case 0x02:
-        ++m_unitMessagesReceived;
-        m_unitCrcs[unit.id] = unit.u.crc;
-        send(fromId, unit.asSubPacket());
+    case 0x00:
+        m_unitMessagesReceived = 1u;
+        m_unitCrcMisses = 0u;
         m_unitCountDirty = true;
         break;
 
     case 0x03:
-    {
         ++m_unitMessagesReceived;
-        send(fromId, unit.asSubPacket());
-        auto it = m_unitCrcs.find(unit.id);
-        if (it != m_unitCrcs.end())
-        {
-            tapacket::TUnitData crc(unit.id, 0u, false);
-            crc.sub = 0x02;
-            crc.u.crc = it->second;
-            send(fromId, crc.asSubPacket());
-        }
         m_unitCountDirty = true;
+        if (unit.u.statusAndLimit[0] == 0x0001)
+        {
+            tapacket::TUnitData reply(unit.id, 0u, false);
+            reply.sub = 0x02;
+            reply.u.crc = 0u;
+            auto it = m_unitCrcs.find(unit.id);
+            if (it != m_unitCrcs.end())
+            {
+                reply.u.crc = it->second;
+            }
+            else
+            {
+                ++m_unitCrcMisses;
+            }
+            send(fromId, reply.asSubPacket());
+        }
         break;
-    }
 
     case 0x04:
         qInfo() << "[GhostWatcher::onUnitData] host has received" << unit.u.statusAndLimit[0] << "of our unit messages";
         break;
 
     default:
+        // sub 2 (a peer's checksum) and anything else still count as messages received.
         ++m_unitMessagesReceived;
         m_unitCountDirty = true;
         break;
@@ -399,7 +440,8 @@ void GhostWatcher::updateClickedIn()
     bool noSync = m_unitMessagesReceived == 0u && m_ticksInState > NO_UNIT_SYNC_TICKS;
     if (syncDone || noSync)
     {
-        qInfo() << "[GhostWatcher::updateClickedIn] clicking in; unit messages received" << m_unitMessagesReceived << "checksums" << m_unitCrcs.size();
+        qInfo() << "[GhostWatcher::updateClickedIn] clicking in; unit messages received" << m_unitMessagesReceived
+                << "table" << m_unitCrcs.size() << "units, not in table" << m_unitCrcMisses;
         m_clickedIn = true;
         sendStatus();
     }

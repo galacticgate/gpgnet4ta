@@ -27,7 +27,8 @@ class GhostWatcher : public QObject
     Q_OBJECT
 
 public:
-    GhostWatcher(QString dplayGuid, QString playerName, QString hostAddress);
+    // unitCrcFile: the unit sync table, one "CRC_FBI,CRC_all" hex pair per line.
+    GhostWatcher(QString dplayGuid, QString playerName, QString hostAddress, QString unitCrcFile);
     ~GhostWatcher();
 
 public slots:
@@ -40,6 +41,7 @@ private:
     void timerEvent(QTimerEvent* event) override;
     void setState(State state);
     void stopTimer();
+    void loadUnitCrcs(const QString& path);
     bool tryJoin();
     void receiveAll();
     void onSystemMessage(const std::uint8_t* payload, std::uint32_t size);
@@ -73,7 +75,8 @@ private:
     unsigned m_unitMessagesReceived;
     unsigned m_ticksSinceUnitMessage;
     bool m_unitCountDirty;
-    std::map<std::uint32_t, std::uint32_t> m_unitCrcs;
+    std::map<std::uint32_t, std::uint32_t> m_unitCrcs;    // CRC_FBI (the unit's id on the wire) -> CRC_all
+    unsigned m_unitCrcMisses;
 
     unsigned m_loadingPercent;
     bool m_sentStart;

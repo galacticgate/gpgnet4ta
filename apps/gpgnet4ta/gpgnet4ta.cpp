@@ -872,7 +872,9 @@ int doMain(int argc, char* argv[])
                 lobby.onConnectToPeer(QString("127.0.0.1:%1").arg(ghostPort), GHOST_PLAYER_NAME, GHOST_PLAYER_NAME, GHOST_TAFNET_ID);
                 ghostLobby->onJoinGame(QString("127.0.0.1:%1").arg(hostLobbyPort), hostAlias, hostAlias, hostTafnetId);
 
-                GhostWatcher* ghostWatcher = new GhostWatcher(dplayGuid, GHOST_PLAYER_NAME, GHOST_BIND_ADDRESS);
+                // The unit sync table lives in the game folder for now (gg-unitcrcs.csv, CRC_FBI,CRC_all).
+                GhostWatcher* ghostWatcher = new GhostWatcher(dplayGuid, GHOST_PLAYER_NAME, GHOST_BIND_ADDRESS,
+                    parser.value("gamepath") + "/gg-unitcrcs.csv");
                 ghostWatcher->moveToThread(&ghostThread);
                 QObject::connect(&ghostThread, &QThread::started, ghostWatcher, &GhostWatcher::start);
                 QObject::connect(&ghostThread, &QThread::finished, ghostWatcher, &QObject::deleteLater);
