@@ -277,6 +277,16 @@ void GhostWatcher::onSystemMessage(const std::uint8_t* payload, std::uint32_t si
         }
         break;
     }
+    case DPSYS_SETSESSIONDESC:
+        // The host changed a game setting. A real joiner answers by announcing its units again;
+        // without it TA's host stayed on "Synching" after a settings change (game 2265).
+        qInfo() << "[GhostWatcher::onSystemMessage] session settings changed; re-announcing our units";
+        if (m_state == State::LOBBY && m_sentUnitList)
+        {
+            sendUnitList();
+            sendStatus();
+        }
+        break;
     case DPSYS_SESSIONLOST:
         qInfo() << "[GhostWatcher::onSystemMessage] session lost; stopping";
         stopTimer();
@@ -537,7 +547,7 @@ void GhostWatcher::updateClickedIn()
         }
         else if (!m_lastViolation.isEmpty())
         {
-            say("Mission restored. Ready.");
+            say("Mission OK. Ready.");
         }
         m_lastViolation = violation;
     }
@@ -558,29 +568,43 @@ QString GhostWatcher::missionViolation()
     tapacket::TPlayerInfo host(m_hostStatus);
     if (host.isCheatsEnabled())
     {
-        return "Cheat codes must be disallowed for this mission.";
+        return "Cheats must be off for this mission.";
     }
     if (m_expectedSettings >= 0 && host.getPermLosByte() != std::uint8_t(m_expectedSettings))
     {
-        return QString("Mission settings changed. Set Game ends, Mapped, Line of sight True (0x%1, want 0x%2).")
-            .arg(host.getPermLosByte(), 2, 16, QChar('0')).arg(m_expectedSettings, 2, 16, QChar('0'));
+        qInfo() << "[GhostWatcher::missionViolation] settings byte" << QString::number(host.getPermLosByte(), 16)
+                << "want" << QString::number(m_expectedSettings, 16);
+        return "Mission needs: Game ends, Mapped, LOS True.";
     }
     if (m_spawnOff)
     {
-        return "Unit spawn is off. Type +spawnon to bring back the mission's units.";
+        return "Unit spawn is off. Type +spawnon.";
     }
     if (m_sawAi && m_aiPlayers.empty())
     {
-        return "This mission needs its AI. Add the AI back to start.";
+        return "This mission needs its AI. Add it back.";
     }
     return QString();
 }
 
 void GhostWatcher::say(const QString& text)
 {
+    // TA shows at most 63 characters of a chat line, our name included, so wrap on spaces.
     qInfo() << "[GhostWatcher::say]" << text;
-    std::string line = "<" + m_playerName.toStdString() + "> " + text.toStdString();
-    sendUdp(0u, tapacket::TPacket::createChatSubpacket(line));
+    const QString prefix = "<" + m_playerName + "> ";
+    const int width = 63 - prefix.size();
+    QString rest = text;
+    while (!rest.isEmpty())
+    {
+        int cut = rest.size() <= width ? rest.size() : rest.lastIndexOf(' ', width);
+        if (cut <= 0)
+        {
+            cut = std::min(width, int(rest.size()));
+        }
+        std::string line = (prefix + rest.left(cut)).toStdString();
+        sendUdp(0u, tapacket::TPacket::createChatSubpacket(line));
+        rest = rest.mid(cut).trimmed();
+    }
 }
 
 void GhostWatcher::sendStatus()
