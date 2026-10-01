@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <map>
 #include <memory>
+#include <vector>
 
 namespace jdplay {
     class JDPlay;
@@ -51,6 +52,7 @@ private:
     void updateClickedIn();
     void sendStatus();
     void sendUnitCount();
+    void sendUnitList();
     void sendLoadingProgress();
     void sendKeepAlive();
     void send(std::uint32_t toId, const tapacket::bytestring& subpak);
@@ -77,6 +79,8 @@ private:
     bool m_unitCountDirty;
     std::map<std::uint32_t, std::uint32_t> m_unitCrcs;    // CRC_FBI (the unit's id on the wire) -> CRC_all
     unsigned m_unitCrcMisses;
+    std::vector<std::uint32_t> m_hostUnitIds;             // round one's unit list, in the host's order
+    bool m_sentUnitList;
 
     unsigned m_loadingPercent;
     bool m_sentStart;

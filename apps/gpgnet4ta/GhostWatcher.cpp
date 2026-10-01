@@ -22,6 +22,7 @@ namespace
     const unsigned UNIT_SYNC_QUIET_TICKS = 30;          // sync counts as done after 3 s of silence
     const unsigned NO_UNIT_SYNC_TICKS = 150;            // or after 15 s if the host never starts one
     const unsigned LOADING_STEP_TICKS = 5;
+    const unsigned UNIT_LIST_QUIET_TICKS = 2;           // round one counts as finished after 200 ms of silence
     const unsigned LOG_FIRST_N_PER_CODE = 12;
     const unsigned LOG_EVERY_NTH_AFTER = 500;
 
@@ -50,6 +51,7 @@ GhostWatcher::GhostWatcher(QString dplayGuid, QString playerName, QString hostAd
     m_ticksSinceUnitMessage(0u),
     m_unitCountDirty(false),
     m_unitCrcMisses(0u),
+    m_sentUnitList(false),
     m_loadingPercent(0u),
     m_sentStart(false),
     m_hostTick(0u)
@@ -138,9 +140,14 @@ void GhostWatcher::timerEvent(QTimerEvent*)
         case State::LOBBY:
             receiveAll();
             ++m_ticksSinceUnitMessage;
-            updateClickedIn();
-            if (m_unitCountDirty)
+            if (!m_sentUnitList && !m_hostUnitIds.empty() && m_ticksSinceUnitMessage >= UNIT_LIST_QUIET_TICKS)
             {
+                sendUnitList();
+            }
+            updateClickedIn();
+            if (m_unitMessagesReceived > 0u)
+            {
+                // A real joiner repeats its count constantly (hundreds a second); once a tick will do.
                 sendUnitCount();
             }
             if (m_ticksInState % STATUS_INTERVAL_TICKS == 0u)
@@ -375,12 +382,13 @@ void GhostWatcher::onSubpacket(std::uint32_t fromId, const tapacket::bytestring&
 
 void GhostWatcher::onUnitData(std::uint32_t fromId, const tapacket::bytestring& s)
 {
-    // Unit sync, as the original replay server ran it against real joiners (TADR Server/tasv.pas):
-    //   host: sub 0, a request, which restarts its count of messages sent
-    //   host: sub 3 per unit, status 0x0001: round one, the unit list. A unit's id on the wire is
-    //         its CRC_FBI. We answer each with sub 2 carrying (CRC_FBI, CRC_all).
-    //   host: sub 3 per unit again, status 0x0101 and its build limit: round two, acknowledgements.
-    // After each round the host waits until our sub 4 count of its messages matches what it sent.
+    // Unit sync, as captured from a real joiner (Oscar joining a game, 2026-10-01):
+    //   host:   sub 0, a request; then sub 3 per unit, status 0x0001 (round one, the host's list);
+    //           later sub 3 per unit again, status 0x0101 (round two).
+    //   joiner: sub 1 announcing how many units it has (count at [10]), then sub 2 per unit with
+    //           its own (CRC_FBI, CRC_all), and all along sub 4, its count of the host's messages
+    //           (1 for the request plus each sub 3; 639 for 319 units).
+    // Without the sub 1 announcement the host waits forever on "Synching".
     if (fromId != m_hostDpId && m_hostDpId != 0u)
     {
         return;
@@ -392,28 +400,20 @@ void GhostWatcher::onUnitData(std::uint32_t fromId, const tapacket::bytestring& 
     case 0x00:
         m_unitMessagesReceived = 1u;
         m_unitCrcMisses = 0u;
-        m_unitCountDirty = true;
+        m_hostUnitIds.clear();
+        m_sentUnitList = false;
         break;
 
     case 0x03:
         ++m_unitMessagesReceived;
-        m_unitCountDirty = true;
         if (unit.u.statusAndLimit[0] == 0x0001)
         {
-            tapacket::TUnitData reply(unit.id, 0u, false);
-            reply.sub = 0x02;
-            reply.u.crc = 0u;
-            auto it = m_unitCrcs.find(unit.id);
-            if (it != m_unitCrcs.end())
-            {
-                reply.u.crc = it->second;
-            }
-            else
-            {
-                ++m_unitCrcMisses;
-                qInfo() << "[GhostWatcher::onUnitData] unit not in table:" << QString::number(unit.id, 16);
-            }
-            send(fromId, reply.asSubPacket());
+            m_hostUnitIds.push_back(unit.id);
+        }
+        else if (!m_sentUnitList && !m_hostUnitIds.empty())
+        {
+            // Round two has begun; announce our list now if the quiet timer hasn't yet.
+            sendUnitList();
         }
         break;
 
@@ -422,11 +422,39 @@ void GhostWatcher::onUnitData(std::uint32_t fromId, const tapacket::bytestring& 
         break;
 
     default:
-        // sub 2 (a peer's checksum) and anything else still count as messages received.
         ++m_unitMessagesReceived;
-        m_unitCountDirty = true;
         break;
     }
+}
+
+void GhostWatcher::sendUnitList()
+{
+    // Our units are the host's units: announce the count, then each with its checksum.
+    tapacket::TUnitData count(0u, 0u, false);
+    count.sub = 0x01;
+    count.u.crc = 0u;
+    count.u.statusAndLimit[0] = std::uint16_t(m_hostUnitIds.size());
+    send(0u, count.asSubPacket());
+
+    for (std::uint32_t id : m_hostUnitIds)
+    {
+        tapacket::TUnitData unit(id, 0u, false);
+        unit.sub = 0x02;
+        unit.u.crc = 0u;
+        auto it = m_unitCrcs.find(id);
+        if (it != m_unitCrcs.end())
+        {
+            unit.u.crc = it->second;
+        }
+        else
+        {
+            ++m_unitCrcMisses;
+            qInfo() << "[GhostWatcher::sendUnitList] unit not in table:" << QString::number(id, 16);
+        }
+        send(0u, unit.asSubPacket());
+    }
+    m_sentUnitList = true;
+    qInfo() << "[GhostWatcher::sendUnitList] announced" << m_hostUnitIds.size() << "units," << m_unitCrcMisses << "not in table";
 }
 
 void GhostWatcher::updateClickedIn()
@@ -437,7 +465,7 @@ void GhostWatcher::updateClickedIn()
     {
         return;
     }
-    bool syncDone = m_unitMessagesReceived > 0u && m_ticksSinceUnitMessage > UNIT_SYNC_QUIET_TICKS;
+    bool syncDone = m_sentUnitList && m_ticksSinceUnitMessage > UNIT_SYNC_QUIET_TICKS;
     bool noSync = m_unitMessagesReceived == 0u && m_ticksInState > NO_UNIT_SYNC_TICKS;
     if (syncDone || noSync)
     {
@@ -467,7 +495,7 @@ void GhostWatcher::sendUnitCount()
     count.sub = 0x04;
     count.u.crc = 0u;
     count.u.statusAndLimit[0] = std::uint16_t(m_unitMessagesReceived);
-    send(m_hostDpId, count.asSubPacket());
+    send(0u, count.asSubPacket());
     m_unitCountDirty = false;
 }
 
