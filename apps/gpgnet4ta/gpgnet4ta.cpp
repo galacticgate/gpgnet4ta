@@ -26,6 +26,7 @@
 
 #ifdef _WIN32
 #include "GhostWatcher.h"
+#include "LobbyPacketDump.h"
 #include <QtCore/qthread.h>
 #include <QtNetwork/qudpsocket.h>
 
@@ -844,8 +845,12 @@ int doMain(int argc, char* argv[])
         int hostLobbyPort = 0;
         int hostTafnetId = 0;
         QString hostAlias;
+        LobbyPacketDump lobbyPacketDump;
         if (parser.isSet("ghostwatcher"))
         {
+            // While the ghost is in development, also dump the TA conversation, hosting or joining:
+            // joining someone else's game shows what a real joiner sends.
+            lobby.subscribePacketHandler(&lobbyPacketDump);
             gameEventsToGpgNet.ignorePlayer(GHOST_PLAYER_NAME);
             QObject::connect(&gpgNetClient, &gpgnet::GpgNetClient::createLobby,
                 [&hostLobbyPort, &hostTafnetId, &hostAlias](int, int localPort, QString playerAlias, QString, int playerId, int) {

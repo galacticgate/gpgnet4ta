@@ -7,7 +7,7 @@ endif()
 
 # GG: the ghost watcher joins TA through DirectPlay, which only the Windows build has.
 if (WIN32)
-  set(GHOST_SOURCES GhostWatcher.h;GhostWatcher.cpp)
+  set(GHOST_SOURCES GhostWatcher.h;GhostWatcher.cpp;LobbyPacketDump.h;LobbyPacketDump.cpp)
   set(GHOST_LIBS jdplay;${DIRECT_PLAY_LIBS})
 endif()
 

@@ -53,6 +53,12 @@ void TaLobby::enableForwardToDemoCompiler(QString hostName, quint16 port, quint3
 }
 
 
+void TaLobby::subscribePacketHandler(tapacket::TaPacketHandler* handler)
+{
+    m_packetParser->subscribe(handler);
+}
+
+
 void TaLobby::connectGameEvents(GameEventHandlerQt &subscriber)
 {
     QObject::connect(m_gameEvents.data(), &GameEventsSignalQt::gameSettings, &subscriber, &GameEventHandlerQt::onGameSettings);

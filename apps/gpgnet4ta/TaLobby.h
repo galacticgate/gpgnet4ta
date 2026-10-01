@@ -40,6 +40,8 @@ public:
     TaLobby(QUuid gameGuid, QString lobbyBindAddress, QString gameReceiveBindAddress, QString gameAddress, bool proactiveResend, quint32 maxPacketSize, bool repairAsymmetricAlliances,
             bool allowExternalAlliances = true, bool allowExternalDeaths = true);
     void enableForwardToDemoCompiler(QString hostName, quint16 port, quint32 tafGameId);
+    // GG: extra observers of the TA traffic (the lobby packet dump).
+    void subscribePacketHandler(tapacket::TaPacketHandler* handler);
 
     void connectGameEvents(GameEventHandlerQt &subscriber);
     quint32 getLocalPlayerDplayId();

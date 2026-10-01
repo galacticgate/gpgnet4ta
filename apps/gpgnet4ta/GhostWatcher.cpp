@@ -411,6 +411,7 @@ void GhostWatcher::onUnitData(std::uint32_t fromId, const tapacket::bytestring& 
             else
             {
                 ++m_unitCrcMisses;
+                qInfo() << "[GhostWatcher::onUnitData] unit not in table:" << QString::number(unit.id, 16);
             }
             send(fromId, reply.asSubPacket());
         }
