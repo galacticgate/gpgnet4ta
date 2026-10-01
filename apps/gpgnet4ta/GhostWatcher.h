@@ -53,6 +53,7 @@ private:
     void sendStatus();
     void sendUnitCount();
     void sendUnitList();
+    void sendUnitChecksum(std::uint32_t id);
     void sendLoadingProgress();
     void sendKeepAlive();
     void send(std::uint32_t toId, const tapacket::bytestring& subpak);
@@ -81,6 +82,7 @@ private:
     unsigned m_unitCrcMisses;
     std::vector<std::uint32_t> m_hostUnitIds;             // round one's unit list, in the host's order
     bool m_sentUnitList;
+    unsigned m_lateUnits;                                  // units first seen after our announcement
     std::map<std::uint16_t, unsigned> m_unitStatusCounts;  // sub 3 status -> how many, for the log
 
     unsigned m_loadingPercent;

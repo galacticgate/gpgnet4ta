@@ -22,7 +22,7 @@ namespace
     const unsigned UNIT_SYNC_QUIET_TICKS = 30;          // sync counts as done after 3 s of silence
     const unsigned NO_UNIT_SYNC_TICKS = 150;            // or after 15 s if the host never starts one
     const unsigned LOADING_STEP_TICKS = 5;
-    const unsigned UNIT_LIST_QUIET_TICKS = 2;           // round one counts as finished after 200 ms of silence
+    const unsigned UNIT_LIST_QUIET_TICKS = 5;           // round one counts as finished after 500 ms of silence
     const unsigned LOG_FIRST_N_PER_CODE = 12;
     const unsigned LOG_EVERY_NTH_AFTER = 500;
 
@@ -52,6 +52,7 @@ GhostWatcher::GhostWatcher(QString dplayGuid, QString playerName, QString hostAd
     m_unitCountDirty(false),
     m_unitCrcMisses(0u),
     m_sentUnitList(false),
+    m_lateUnits(0u),
     m_loadingPercent(0u),
     m_sentStart(false),
     m_hostTick(0u)
@@ -401,6 +402,7 @@ void GhostWatcher::onUnitData(std::uint32_t fromId, const tapacket::bytestring& 
         m_unitMessagesReceived = 1u;
         m_unitCrcMisses = 0u;
         m_unitStatusCounts.clear();
+        m_lateUnits = 0u;
         m_hostUnitIds.clear();
         m_sentUnitList = false;
         break;
@@ -410,6 +412,15 @@ void GhostWatcher::onUnitData(std::uint32_t fromId, const tapacket::bytestring& 
         ++m_unitStatusCounts[unit.u.statusAndLimit[0]];
         if (m_sentUnitList)
         {
+            // Round one can pause mid-list (game 2263 announced 307 of 319), so a unit first seen
+            // after our announcement still gets its checksum: the demo's unit table needs one per
+            // unit, and the client matches the unit catalog by that table's length.
+            if (std::find(m_hostUnitIds.begin(), m_hostUnitIds.end(), unit.id) == m_hostUnitIds.end())
+            {
+                m_hostUnitIds.push_back(unit.id);
+                sendUnitChecksum(unit.id);
+                ++m_lateUnits;
+            }
             break;
         }
         if (unit.u.statusAndLimit[0] == 0x0101 && !m_hostUnitIds.empty())
@@ -435,6 +446,24 @@ void GhostWatcher::onUnitData(std::uint32_t fromId, const tapacket::bytestring& 
     }
 }
 
+void GhostWatcher::sendUnitChecksum(std::uint32_t id)
+{
+    tapacket::TUnitData unit(id, 0u, false);
+    unit.sub = 0x02;
+    unit.u.crc = 0u;
+    auto it = m_unitCrcs.find(id);
+    if (it != m_unitCrcs.end())
+    {
+        unit.u.crc = it->second;
+    }
+    else
+    {
+        ++m_unitCrcMisses;
+        qInfo() << "[GhostWatcher::sendUnitChecksum] unit not in table:" << QString::number(id, 16);
+    }
+    send(0u, unit.asSubPacket());
+}
+
 void GhostWatcher::sendUnitList()
 {
     // Our units are the host's units: announce the count, then each with its checksum.
@@ -446,20 +475,7 @@ void GhostWatcher::sendUnitList()
 
     for (std::uint32_t id : m_hostUnitIds)
     {
-        tapacket::TUnitData unit(id, 0u, false);
-        unit.sub = 0x02;
-        unit.u.crc = 0u;
-        auto it = m_unitCrcs.find(id);
-        if (it != m_unitCrcs.end())
-        {
-            unit.u.crc = it->second;
-        }
-        else
-        {
-            ++m_unitCrcMisses;
-            qInfo() << "[GhostWatcher::sendUnitList] unit not in table:" << QString::number(id, 16);
-        }
-        send(0u, unit.asSubPacket());
+        sendUnitChecksum(id);
     }
     m_sentUnitList = true;
     QStringList statuses;
@@ -482,7 +498,8 @@ void GhostWatcher::updateClickedIn()
     bool noSync = m_unitMessagesReceived == 0u && m_ticksInState > NO_UNIT_SYNC_TICKS;
     if (syncDone || noSync)
     {
-        qInfo() << "[GhostWatcher::updateClickedIn] clicking in; unit messages received" << m_unitMessagesReceived
+        qInfo() << "[GhostWatcher::updateClickedIn] clicking in; units" << m_hostUnitIds.size() << "of which late" << m_lateUnits
+            << "; unit messages received" << m_unitMessagesReceived
                 << "table" << m_unitCrcs.size() << "units, not in table" << m_unitCrcMisses;
         m_clickedIn = true;
         sendStatus();
