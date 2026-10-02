@@ -619,7 +619,11 @@ QString GhostWatcher::missionViolation()
     {
         return "Cheats must be off for this mission.";
     }
-    if (m_expectedSettings >= 0 && host.getPermLosByte() != std::uint8_t(m_expectedSettings))
+    // 0x40 is Location: Fixed (game 2280; Random reads 0x0e). Missions start at fixed positions
+    // and lockOptions holds it there, so only the commander, mapping and LOS bits are compared.
+    const std::uint8_t LOCATION_FIXED_BIT = 0x40;
+    if (m_expectedSettings >= 0 &&
+        (host.getPermLosByte() & ~LOCATION_FIXED_BIT) != (std::uint8_t(m_expectedSettings) & ~LOCATION_FIXED_BIT))
     {
         qInfo() << "[GhostWatcher::missionViolation] settings byte" << QString::number(host.getPermLosByte(), 16)
                 << "want" << QString::number(m_expectedSettings, 16);
