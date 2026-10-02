@@ -64,6 +64,7 @@ private:
     void sendUnitChecksum(std::uint32_t id);
     void sendLoadingProgress();
     void sendKeepAlive();
+    void logGameSummary();
     void send(std::uint32_t toId, const tapacket::bytestring& subpak);
     void sendUdp(std::uint32_t toId, const tapacket::bytestring& subpak);
     void logSubpacket(const char* direction, std::uint32_t peerId, const tapacket::bytestring& s);
@@ -97,6 +98,8 @@ private:
     unsigned m_loadingPercent;
     bool m_sentStart;
     std::uint32_t m_hostTick;
+    std::uint32_t m_lastLoggedHostTick = 0u;
+    std::map<std::pair<unsigned, unsigned>, unsigned> m_recvWindow;  // (code, size) -> count since the last game summary
 
     std::map<unsigned, unsigned> m_loggedCounts;
 

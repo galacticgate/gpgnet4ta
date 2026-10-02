@@ -187,6 +187,10 @@ void GhostWatcher::timerEvent(QTimerEvent*)
         case State::PLAYING:
             receiveAll();
             sendKeepAlive();
+            if (m_ticksInState % 20u == 0u)
+            {
+                logGameSummary();
+            }
             break;
         }
     }
@@ -342,6 +346,10 @@ void GhostWatcher::onTaMessage(std::uint32_t fromId, const std::uint8_t* _payloa
 void GhostWatcher::onSubpacket(std::uint32_t fromId, const tapacket::bytestring& s)
 {
     logSubpacket("recv", fromId, s);
+    if (m_state == State::PLAYING)
+    {
+        ++m_recvWindow[std::make_pair(unsigned(s[0]), unsigned(s.size()))];
+    }
     switch (tapacket::SubPacketCode(s[0]))
     {
     case tapacket::SubPacketCode::PING_02:
@@ -744,6 +752,22 @@ void GhostWatcher::sendLoadingProgress()
         m_sentStart = true;
         qInfo() << "[GhostWatcher::sendLoadingProgress] loaded";
     }
+}
+
+void GhostWatcher::logGameSummary()
+{
+    // Every 2 s in game: the tick we echo, how far it moved, and what the host sent meanwhile.
+    // After a mission's victory TA slowed to 19 ticks/s (game 2284) while waiting on us, it seems;
+    // this shows whether our echoed tick stopped following the host's.
+    QStringList codes;
+    for (const auto& kv : m_recvWindow)
+    {
+        codes << QString("%1/%2x%3").arg(kv.first.first, 2, 16, QChar('0')).arg(kv.first.second).arg(kv.second);
+    }
+    qInfo() << "[GhostWatcher::logGameSummary] host tick" << m_hostTick << "+" << (m_hostTick - m_lastLoggedHostTick)
+            << "| recv" << codes.join(' ');
+    m_lastLoggedHostTick = m_hostTick;
+    m_recvWindow.clear();
 }
 
 void GhostWatcher::sendKeepAlive()
