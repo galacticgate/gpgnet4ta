@@ -65,6 +65,8 @@ private:
     void sendLoadingProgress();
     void sendKeepAlive();
     void logGameSummary();
+    void sendResourceInfo(bool gameOver);
+    void sendGameOver(bool done);
     void send(std::uint32_t toId, const tapacket::bytestring& subpak);
     void sendUdp(std::uint32_t toId, const tapacket::bytestring& subpak);
     void logSubpacket(const char* direction, std::uint32_t peerId, const tapacket::bytestring& s);
@@ -99,6 +101,8 @@ private:
     bool m_sentStart;
     std::uint32_t m_hostTick;
     std::uint32_t m_lastLoggedHostTick = 0u;
+    unsigned m_gameOverTicks = 0u;       // timer ticks since the host's first end-of-game 0x28, 0 before
+    unsigned m_lastResourceReplyTick = 0u;
     std::map<std::pair<unsigned, unsigned>, unsigned> m_recvWindow;  // (code, size) -> count since the last game summary
 
     std::map<unsigned, unsigned> m_loggedCounts;

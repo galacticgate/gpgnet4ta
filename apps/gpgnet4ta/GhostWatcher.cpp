@@ -191,6 +191,15 @@ void GhostWatcher::timerEvent(QTimerEvent*)
             {
                 logGameSummary();
             }
+            if (m_gameOverTicks == 0u && m_ticksInState % 30u == 0u)
+            {
+                // A real watcher reports its (empty) resources every 3 s or so, as players do.
+                sendResourceInfo(false);
+            }
+            else if (m_gameOverTicks > 0u && ++m_gameOverTicks == 10u)
+            {
+                sendGameOver(true);
+            }
             break;
         }
     }
@@ -443,6 +452,29 @@ void GhostWatcher::onSubpacket(std::uint32_t fromId, const tapacket::bytestring&
         m_haveSlotList = true;
         break;
     }
+
+    case tapacket::SubPacketCode::PLAYER_RESOURCE_INFO_28:
+        // The end of the game (Victory): TA sends "28 01 ..." and waits for every player, watchers
+        // too, to answer in kind and with "29 01 00", then "29 01 01". Unanswered, the host
+        // repeated it 8 times a second and the game slowed to 19 ticks/s (games 2284 and 2285).
+        // The answer is what Venom's watcher sent in game 1935.
+        if (m_state == State::PLAYING && fromId == m_hostDpId && s.size() >= 2u && s[1] == 0x01)
+        {
+            if (m_gameOverTicks == 0u)
+            {
+                qInfo() << "[GhostWatcher::onSubpacket] the game is over; answering the end-of-game exchange";
+                m_gameOverTicks = 1u;
+                sendResourceInfo(true);
+                sendGameOver(false);
+                m_lastResourceReplyTick = m_ticksInState;
+            }
+            else if (m_ticksInState - m_lastResourceReplyTick >= 10u)
+            {
+                sendResourceInfo(true);
+                m_lastResourceReplyTick = m_ticksInState;
+            }
+        }
+        break;
 
     case tapacket::SubPacketCode::LOADING_STARTED_08:
         if (m_state == State::LOBBY)
@@ -768,6 +800,27 @@ void GhostWatcher::logGameSummary()
             << "| recv" << codes.join(' ');
     m_lastLoggedHostTick = m_hostTick;
     m_recvWindow.clear();
+}
+
+void GhostWatcher::sendResourceInfo(bool gameOver)
+{
+    // A watcher's 0x28 (game 1935): nothing produced or stored, storage 1000 metal and 1000
+    // energy (floats at 42 and 54); byte 1 is 1 once the game is over.
+    tapacket::bytestring pkt(58u, 0u);
+    pkt[0] = std::uint8_t(tapacket::SubPacketCode::PLAYER_RESOURCE_INFO_28);
+    pkt[1] = gameOver ? 0x01 : 0x00;
+    const std::uint8_t storage[] = { 0x00, 0x00, 0x7a, 0x44 };   // 1000.0f
+    std::copy(storage, storage + 4, pkt.begin() + 42);
+    std::copy(storage, storage + 4, pkt.begin() + 54);
+    sendUdp(0u, pkt);
+}
+
+void GhostWatcher::sendGameOver(bool done)
+{
+    // "29 01 00" when the game ends, "29 01 01" a moment later, as every player and the watcher
+    // sent in game 1935.
+    std::uint8_t pkt[] = { std::uint8_t(tapacket::SubPacketCode::UNK_29), 0x01, std::uint8_t(done ? 0x01 : 0x00) };
+    send(0u, tapacket::bytestring(pkt, sizeof(pkt)));
 }
 
 void GhostWatcher::sendKeepAlive()
