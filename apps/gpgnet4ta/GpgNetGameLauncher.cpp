@@ -353,7 +353,8 @@ void GpgNetGameLauncher::createTAInitFile(QString tmplateFilename, QString iniFi
     txt.replace("{playerlimit}", QString::number(std::max(2, std::min(playerLimit, 10))));
     txt.replace("{maxunits}", QString::number(std::max(20, std::min(maxUnits, 1500))));
     txt.replace("{lockoptions}", lockOptions ? "1" : "0");
-    txt.replace("{location}", randomPositions ? "2" : "1");
+    // GG: a mission's scripted units head for start spot 1, so the host must start there: fixed.
+    txt.replace("{location}", randomPositions && !missionLock ? "2" : "1");
     // GG: GG's TDraw reads this key. On a mission map it keeps the mission's AI in the
     // battleroom and refuses +spawnoff. Written every launch, so a later normal game clears it.
     if (!txt.endsWith(QChar('\n')))
