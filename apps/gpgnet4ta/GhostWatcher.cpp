@@ -22,8 +22,7 @@ namespace
     const unsigned STATUS_INTERVAL_TICKS = 10;          // repeat our status every 1 s
     const unsigned AI_SUMMARY_TICKS = 50;               // log what the AI rule sees every 5 s
     const qint64 AI_STALE_MS = 6000;                    // an AI is gone once its status (sent every ~2 s) stops this long
-    const qint64 AI_MISSING_GRACE_MS = 4000;            // and the mission objects only after this long, so a
-                                                        // newly added AI is not briefly reported missing
+    const qint64 AI_MISSING_GRACE_MS = 0;               // object at once: removing an AI deletes its player
     const unsigned UNIT_SYNC_QUIET_TICKS = 30;          // sync counts as done after 3 s of silence
     const unsigned NO_UNIT_SYNC_TICKS = 150;            // or after 15 s if the host never starts one
     const unsigned LOADING_STEP_TICKS = 5;
@@ -620,10 +619,7 @@ QString GhostWatcher::missionViolation()
     {
         return "Unit spawn is off. Type +spawnon.";
     }
-    // Removing an AI (click its name until the slot is empty) neither deletes its DirectPlay
-    // player nor takes it off the host's slot list (game 2267, list unchanged for minutes), so
-    // the AI counts as present while its status packets keep coming and the slot list (when we
-    // have one) still names it.
+    // The AI counts as present while its DirectPlay player exists and its status keeps coming.
     if (m_sawAi && !aiPresent())
     {
         if (m_aiMissingSinceMs < 0)
@@ -647,9 +643,11 @@ bool GhostWatcher::aiPresent()
     for (std::uint32_t ai : m_aiPlayers)
     {
         auto seen = m_aiLastSeenMs.find(ai);
+        // Removing an AI deletes its DirectPlay player (it leaves m_aiPlayers at once; game 2268);
+        // a status that stops arriving is the backup. The slot list is not used: it names a newly
+        // added AI about 2 s after the AI's own first status, which made adding look like removal.
         bool recent = seen != m_aiLastSeenMs.end() && m_clock.elapsed() - seen->second < AI_STALE_MS;
-        bool inSlot = !m_haveSlotList || m_slotPlayers.count(ai) > 0u;
-        if (recent && inSlot)
+        if (recent)
         {
             return true;
         }
