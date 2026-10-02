@@ -91,6 +91,7 @@ private:
     std::vector<std::uint32_t> m_hostUnitIds;             // round one's unit list, in the host's order
     bool m_sentUnitList;
     unsigned m_lateUnits;                                  // units first seen after our announcement
+    bool m_reannounceUnits;                                // late units arrived: announce the whole list again
     std::map<std::uint16_t, unsigned> m_unitStatusCounts;  // sub 3 status -> how many, for the log
 
     unsigned m_loadingPercent;

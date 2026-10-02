@@ -57,6 +57,7 @@ GhostWatcher::GhostWatcher(QString dplayGuid, QString playerName, QString hostAd
     m_unitCrcMisses(0u),
     m_sentUnitList(false),
     m_lateUnits(0u),
+    m_reannounceUnits(false),
     m_loadingPercent(0u),
     m_sentStart(false),
     m_hostTick(0u),
@@ -152,6 +153,10 @@ void GhostWatcher::timerEvent(QTimerEvent*)
             receiveAll();
             ++m_ticksSinceUnitMessage;
             if (!m_sentUnitList && !m_hostUnitIds.empty() && m_ticksSinceUnitMessage >= UNIT_LIST_QUIET_TICKS)
+            {
+                sendUnitList();
+            }
+            else if (m_reannounceUnits && m_ticksSinceUnitMessage >= UNIT_LIST_QUIET_TICKS)
             {
                 sendUnitList();
             }
@@ -478,6 +483,7 @@ void GhostWatcher::onUnitData(std::uint32_t fromId, const tapacket::bytestring& 
         m_unitCrcMisses = 0u;
         m_unitStatusCounts.clear();
         m_lateUnits = 0u;
+        m_reannounceUnits = false;
         m_hostUnitIds.clear();
         m_sentUnitList = false;
         break;
@@ -487,14 +493,16 @@ void GhostWatcher::onUnitData(std::uint32_t fromId, const tapacket::bytestring& 
         ++m_unitStatusCounts[unit.u.statusAndLimit[0]];
         if (m_sentUnitList)
         {
-            // Round one can pause mid-list (game 2263 announced 307 of 319), so a unit first seen
-            // after our announcement still gets its checksum: the demo's unit table needs one per
-            // unit, and the client matches the unit catalog by that table's length.
+            // Round one can pause mid-list (games 2263 and 2271 announced 307 of 319). A unit first
+            // seen after our announcement means our count was short, and TA's host then waits on
+            // "Synching" for good (game 2271), so announce the whole list again once the host goes
+            // quiet. The demo's unit table needs every unit too: the client matches the unit
+            // catalog by that table's length.
             if (std::find(m_hostUnitIds.begin(), m_hostUnitIds.end(), unit.id) == m_hostUnitIds.end())
             {
                 m_hostUnitIds.push_back(unit.id);
-                sendUnitChecksum(unit.id);
                 ++m_lateUnits;
+                m_reannounceUnits = true;
             }
             break;
         }
@@ -542,6 +550,8 @@ void GhostWatcher::sendUnitChecksum(std::uint32_t id)
 void GhostWatcher::sendUnitList()
 {
     // Our units are the host's units: announce the count, then each with its checksum.
+    m_unitCrcMisses = 0u;
+    m_reannounceUnits = false;
     tapacket::TUnitData count(0u, 0u, false);
     count.sub = 0x01;
     count.u.crc = 0u;
