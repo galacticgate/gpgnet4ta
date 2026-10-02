@@ -754,6 +754,8 @@ int doMain(int argc, char* argv[])
 
         launcher.parseGameFileVersions(parser.value("verify"));
         launcher.setEnableGameFileVersionVerify(parser.isSet("israted"));
+        // GG: a placement mission is a ghost-watched game with locked options (the client passes both).
+        launcher.setMissionLock(parser.isSet("ghostwatcher") && parser.isSet("lockoptions"));
 
         // TaLobby is a conglomerate of objects that handles a man-in-the-middle relay of TA network traffic
         // Together they work to tunnel everything through a single UDP port

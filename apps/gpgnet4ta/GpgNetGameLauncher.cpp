@@ -312,7 +312,7 @@ void GpgNetGameLauncher::onStartApplication()
     }
 
     QString sessionName = m_thisPlayerName + "'s Game";
-    createTAInitFile(m_iniTemplate, m_iniTarget, sessionName, m_mapName, m_playerLimit, m_lockOptions, m_maxUnits, m_randomPositions);
+    createTAInitFile(m_iniTemplate, m_iniTarget, sessionName, m_mapName, m_playerLimit, m_lockOptions, m_maxUnits, m_randomPositions, m_missionLock);
     copyOnlineDll(m_gamePath + "/online.dll");
     if (m_enableGameFileVersionVerify && !verifyGameFileVersions())
     {
@@ -336,7 +336,7 @@ void GpgNetGameLauncher::onStartApplication()
     // next we expect to receive a call to our onLaunchClientStateChanged slot
 }
 
-void GpgNetGameLauncher::createTAInitFile(QString tmplateFilename, QString iniFilename, QString session, QString mission, int playerLimit, bool lockOptions, int maxUnits, bool randomPositions)
+void GpgNetGameLauncher::createTAInitFile(QString tmplateFilename, QString iniFilename, QString session, QString mission, int playerLimit, bool lockOptions, int maxUnits, bool randomPositions, bool missionLock)
 {
     qInfo() << "[GpgNetGameLauncher::createTAInitFile] Loading ta ini template:" << tmplateFilename;
     QFile tmplt(tmplateFilename);
@@ -354,6 +354,13 @@ void GpgNetGameLauncher::createTAInitFile(QString tmplateFilename, QString iniFi
     txt.replace("{maxunits}", QString::number(std::max(20, std::min(maxUnits, 1500))));
     txt.replace("{lockoptions}", lockOptions ? "1" : "0");
     txt.replace("{location}", randomPositions ? "2" : "1");
+    // GG: GG's TDraw reads this key. On a mission map it keeps the mission's AI in the
+    // battleroom and refuses +spawnoff. Written every launch, so a later normal game clears it.
+    if (!txt.endsWith(QChar('\n')))
+    {
+        txt += QChar('\n');
+    }
+    txt += QString("ggmissionlock=%1\n").arg(missionLock ? 1 : 0);
 
     qInfo() << "[GpgNetGameLauncher::createTAInitFile] saving ta ini:" << iniFilename;
     QFile ini(iniFilename);
@@ -364,6 +371,11 @@ void GpgNetGameLauncher::createTAInitFile(QString tmplateFilename, QString iniFi
 
     QTextStream out(&ini);
     ini.write(txt.toUtf8());
+}
+
+void GpgNetGameLauncher::setMissionLock(bool missionLock)
+{
+    m_missionLock = missionLock;
 }
 
 void GpgNetGameLauncher::copyOnlineDll(QString target)

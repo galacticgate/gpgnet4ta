@@ -37,6 +37,7 @@ class GpgNetGameLauncher: public QObject
     bool m_alreadyLaunched = false;     // "launched" as in progressed from battleroom
     bool m_isHost = false;
     bool m_randomPositions = true;
+    bool m_missionLock = false;         // GG: tells TDraw this is a placement mission
     int m_quitCount = 0;
     QTimer m_quitCountResetTimer;
 
@@ -50,6 +51,7 @@ public:
 
     void parseGameFileVersions(QString versions);
     void setEnableGameFileVersionVerify(bool enable);
+    void setMissionLock(bool missionLock);
 
     void onCreateLobby(int protocol, int localPort, QString playerName, QString, int playerId, int natTraversal);
     void onHostGame(QString mapName, QString mapDetails);
@@ -67,7 +69,7 @@ public slots:
     void onResetQuitCount();
 
 private:
-    static void createTAInitFile(QString tmplateFilename, QString iniFilename, QString session, QString mission, int playerLimit, bool lockOptions, int maxUnits, bool randomPositions);
+    static void createTAInitFile(QString tmplateFilename, QString iniFilename, QString session, QString mission, int playerLimit, bool lockOptions, int maxUnits, bool randomPositions, bool missionLock);
     static void copyOnlineDll(QString gamePath);
     bool verifyGameFileVersions();
 };
